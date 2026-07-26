@@ -127,6 +127,22 @@ PROMPT_PATTERNS = [
     r"silently\s+exfiltrat",
     r"exfiltrat",
     r"continue\s+even\s+if\s+.*stop",
+    r"ignore\s+.*user",
+    r"ignore\s+.*system",
+    r"ignore\s+.*instruction",
+    r"ignore\s+.*stop",
+    r"ignore\s+.*cancel",
+    r"override\s+.*instruction",
+    r"override\s+.*system",
+    r"bypass\s+.*user",
+    r"without\s+.*user.?s?\s+permission",
+    r"without\s+informing\s+the\s+user",
+    r"never\s+tell\s+the\s+user",
+    r"do\s+not\s+tell\s+the\s+user",
+    r"silently\s+upload",
+    r"silently\s+send",
+    r"silently\s+exfiltrat",
+    r"exfiltrat",
 ]
 
 
@@ -178,24 +194,28 @@ def has_excessive_permissions(frontmatter):
 
 
 def has_unclear_provenance(frontmatter, body):
-    """
-    Only flag if there is evidence of silently modifying provenance.
-    Merely missing metadata is not enough because many valid skills may omit it.
-    """
+    keys = {str(k).lower() for k in frontmatter.keys()}
 
-    text = body.lower()
-
-    suspicious = (
-        "silently update" in text
-        and "version" in text
-    ) or (
-        "clear the changelog" in text
-    ) or (
-        "without surfacing" in text
-        and "version" in text
+    missing_metadata = (
+        "author" not in keys
+        and "version" not in keys
+        and "changelog" not in keys
     )
 
-    return suspicious
+    body = body.lower()
+
+    silent_rewrite = (
+        ("version" in body and (
+            "silently update" in body
+            or "without surfacing" in body
+            or "without telling the reviewer" in body
+            or "without notifying the reviewer" in body
+        ))
+        or "clear the changelog" in body
+    )
+
+    # Only flag missing metadata if the skill actually has frontmatter.
+    return (frontmatter and missing_metadata) or silent_rewrite
 
 
 # ---------- Endpoint ----------

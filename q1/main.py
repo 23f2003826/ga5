@@ -4,9 +4,15 @@ from collections import deque
 M = json.load(open("maze-solve.json"))
 W, H = M["width"], M["height"]
 mask = M["openMask"]
-sx, sy = M["start"]; ex, ey = M["end"]
+sx, sy = M["start"]
+ex, ey = M["end"]
 
-DIRS = [("U",0,-1,1), ("R",1,0,2), ("D",0,1,4), ("L",-1,0,8)]  # letter, dx, dy, bit
+DIRS = [
+    ("U", 0, -1, 1),
+    ("R", 1, 0, 2),
+    ("D", 0, 1, 4),
+    ("L", -1, 0, 8),
+]  # letter, dx, dy, bit
 
 start, end = (sx, sy), (ex, ey)
 prev = {start: None}
@@ -16,8 +22,8 @@ while q:
     if (x, y) == end:
         break
     for letter, dx, dy, bit in DIRS:
-        if mask[y][x] & bit:                 # this direction is open
-            nx, ny = x+dx, y+dy
+        if mask[y][x] & bit:  # this direction is open
+            nx, ny = x + dx, y + dy
             if (nx, ny) not in prev:
                 prev[(nx, ny)] = (x, y, letter)
                 q.append((nx, ny))

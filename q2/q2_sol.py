@@ -1,21 +1,22 @@
-import calendar
-from fastapi import Request, APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 router = APIRouter()
+
 
 @router.get("/q2")
 async def get_q2():
     return {
         "message": "This is the solution for Question 2. Please Check the /prorate endpoint."
-        }
+    }
+
 
 @router.post("/prorate")
 async def prorate(req: Request):
     b = await req.json()
 
     old_price = b["old_price"]
-    new_price = b["new_price"]          
-    days_remaining = b["days_remaining"]                                
+    new_price = b["new_price"]
+    days_remaining = b["days_remaining"]
     days_in_actual_month = b["days_in_actual_month"]
     spec = b["spec"]
 

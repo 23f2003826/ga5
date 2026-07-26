@@ -10,11 +10,13 @@ from pydantic import BaseModel
 
 router = APIRouter()
 
+
 @router.get("/q3")
 async def get_q3():
     return {
         "message": "This is the solution for Question 3. Please Check the /guardrail endpoint."
-        }
+    }
+
 
 HOME = Path("/home/agent")
 WORKSPACE = HOME / "workspace"
@@ -42,8 +44,8 @@ class ToolCall(BaseModel):
 def expand_home(s: str) -> str:
     return (
         s.replace("${HOME}", str(HOME))
-         .replace("$HOME", str(HOME))
-         .replace("~", str(HOME), 1)
+        .replace("$HOME", str(HOME))
+        .replace("~", str(HOME), 1)
     )
 
 
@@ -118,55 +120,34 @@ async def guardrail(call: ToolCall):
         if command_reads_secret(cmd):
             return {
                 "decision": "block",
-                "reason": "Attempt to read protected credential file."
+                "reason": "Attempt to read protected credential file.",
             }
 
-        return {
-            "decision": "allow",
-            "reason": "Command allowed."
-        }
+        return {"decision": "allow", "reason": "Command allowed."}
 
     elif call.tool == "write_file":
         if call.path is None:
-            return {
-                "decision": "block",
-                "reason": "Missing path."
-            }
+            return {"decision": "block", "reason": "Missing path."}
 
         target = resolve_path(call.path)
 
         if inside_output(target):
-            return {
-                "decision": "allow",
-                "reason": "Write permitted."
-            }
+            return {"decision": "allow", "reason": "Write permitted."}
 
         return {
             "decision": "block",
-            "reason": "Writes are only permitted inside /workspace/output."
+            "reason": "Writes are only permitted inside /workspace/output.",
         }
 
     elif call.tool == "http_request":
         if call.url is None:
-            return {
-                "decision": "block",
-                "reason": "Missing URL."
-            }
+            return {"decision": "block", "reason": "Missing URL."}
 
         host = (urlparse(call.url).hostname or "").lower()
 
         if host in ALLOWED_HOSTS:
-            return {
-                "decision": "allow",
-                "reason": "Destination host allowed."
-            }
+            return {"decision": "allow", "reason": "Destination host allowed."}
 
-        return {
-            "decision": "block",
-            "reason": "Destination host not allowed."
-        }
+        return {"decision": "block", "reason": "Destination host not allowed."}
 
-    return {
-        "decision": "block",
-        "reason": "Unknown tool."
-    }
+    return {"decision": "block", "reason": "Unknown tool."}

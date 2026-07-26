@@ -1,6 +1,6 @@
 import re
-import yaml
 
+import yaml
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -149,10 +149,7 @@ PROMPT_PATTERNS = [
 def has_prompt_injection(body):
     text = body.lower()
 
-    return any(
-        re.search(pattern, text)
-        for pattern in PROMPT_PATTERNS
-    )
+    return any(re.search(pattern, text) for pattern in PROMPT_PATTERNS)
 
 
 # ---------- excessive_permissions ----------
@@ -197,22 +194,20 @@ def has_unclear_provenance(frontmatter, body):
     keys = {str(k).lower() for k in frontmatter.keys()}
 
     missing_metadata = (
-        "author" not in keys
-        and "version" not in keys
-        and "changelog" not in keys
+        "author" not in keys and "version" not in keys and "changelog" not in keys
     )
 
     body = body.lower()
 
     silent_rewrite = (
-        ("version" in body and (
+        "version" in body
+        and (
             "silently update" in body
             or "without surfacing" in body
             or "without telling the reviewer" in body
             or "without notifying the reviewer" in body
-        ))
-        or "clear the changelog" in body
-    )
+        )
+    ) or "clear the changelog" in body
 
     # Only flag missing metadata if the skill actually has frontmatter.
     return (frontmatter and missing_metadata) or silent_rewrite

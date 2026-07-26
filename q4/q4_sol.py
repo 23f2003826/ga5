@@ -160,7 +160,7 @@ def has_unclear_provenance(frontmatter, text):
     return missing or rewrite
 
 
-@app.post("/")
+@app.post("/check")
 def scan(req: SkillRequest):
     fm, body = split_frontmatter(req.skill)
 

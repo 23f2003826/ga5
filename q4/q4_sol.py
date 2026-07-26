@@ -1,120 +1,168 @@
 import re
-
 import yaml
+
 from fastapi import APIRouter
 from pydantic import BaseModel
 
 router = APIRouter()
 
+
+@router.get("/q4")
+async def get_q4():
+    return {
+        "message": "This is the solution for Question 4. Please check the /scan endpoint."
+    }
+
+
 class SkillRequest(BaseModel):
     skill: str
 
 
-SECRET_PATTERNS = [
-    re.compile(r"sk-[A-Za-z0-9]{20,}"),  # OpenAI-like
-    re.compile(r"AKIA[0-9A-Z]{16}"),  # AWS access key
-    re.compile(r"AIza[0-9A-Za-z\-_]{35}"),  # Google API
-    re.compile(r"https://hooks\.slack\.com/services/\S+"),  # Slack webhook
+# ---------- Secret Detection ----------
+
+SECRET_REGEXES = [
+    re.compile(r"sk-[A-Za-z0-9_-]{20,}"),
+    re.compile(r"AKIA[0-9A-Z]{16}"),
+    re.compile(r"AIza[A-Za-z0-9_-]{35}"),
+    re.compile(r"ghp_[A-Za-z0-9]{36,}"),
+    re.compile(r"https://hooks\.slack\.com/services/\S+"),
     re.compile(r"https://discord(?:app)?\.com/api/webhooks/\S+"),
-    re.compile(r"ghp_[A-Za-z0-9]{36,}"),  # GitHub PAT
 ]
 
-SECRET_KEYWORDS = [
+SECRET_KEYS = {
     "api_key",
     "apikey",
     "secret",
     "token",
     "password",
     "webhook",
-]
+    "access_token",
+    "client_secret",
+    "private_key",
+}
+
+
+# ---------- Utilities ----------
 
 
 def split_frontmatter(text: str):
-    if not text.startswith("---"):
-        return {}, text
+    """
+    Returns (frontmatter_dict, markdown_body)
+    """
 
-    m = re.match(r"^---\n(.*?)\n---\n?(.*)$", text, re.DOTALL)
-    if not m:
+    match = re.match(
+        r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?(.*)$",
+        text,
+        re.DOTALL,
+    )
+
+    if not match:
         return {}, text
 
     try:
-        fm = yaml.safe_load(m.group(1)) or {}
-    except Exception:  # noqa: BLE001
-        fm = {}
+        frontmatter = yaml.safe_load(match.group(1)) or {}
+    except Exception:
+        frontmatter = {}
 
-    return fm, m.group(2)
+    return frontmatter, match.group(2)
 
 
-def has_hardcoded_secret(text, frontmatter):
-    blob = text
+# ---------- hardcoded_secret ----------
 
-    for pat in SECRET_PATTERNS:
-        if pat.search(blob):
+
+def _walk_secret(obj):
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            key = str(k).lower()
+
+            if key in SECRET_KEYS and isinstance(v, str):
+                value = v.strip()
+
+                if value and not (
+                    value.startswith("${")
+                    or value.startswith("$")
+                    or "env" in value.lower()
+                ):
+                    return True
+
+            if _walk_secret(v):
+                return True
+
+    elif isinstance(obj, list):
+        for item in obj:
+            if _walk_secret(item):
+                return True
+
+    elif isinstance(obj, str):
+        for regex in SECRET_REGEXES:
+            if regex.search(obj):
+                return True
+
+    return False
+
+
+def has_hardcoded_secret(skill_text, frontmatter):
+    if _walk_secret(frontmatter):
+        return True
+
+    for regex in SECRET_REGEXES:
+        if regex.search(skill_text):
             return True
 
-    def walk(v):
-        if isinstance(v, dict):
-            for k, val in v.items():
-                lk = str(k).lower()
-                if lk in SECRET_KEYWORDS:  # noqa: SIM102
-                    if isinstance(val, str) and not (
-                        "${" in val
-                        or "$" in val
-                        or "env" in val.lower()
-                        or "secret" in val.lower()
-                    ):
-                        return True
-                if walk(val):
-                    return True
-        elif isinstance(v, list):
-            for x in v:
-                if walk(x):
-                    return True
-        return False
-
-    return walk(frontmatter)
+    return False
 
 
-def has_prompt_injection(text):
-    t = text.lower()
+# ---------- prompt_injection ----------
 
-    patterns = [
-        r"ignore .*user",
-        r"ignore .*instruction",
-        r"ignore .*stop",
-        r"ignore .*cancel",
-        r"continue .*even if .*stop",
-        r"silently exfiltrat",
-        r"exfiltrat",
-        r"send .*without.*user",
-        r"without informing.*user",
-        r"do not tell the user",
-        r"never tell the user",
-    ]
 
-    return any(re.search(p, t) for p in patterns)
+PROMPT_PATTERNS = [
+    r"ignore\s+(all\s+)?previous\s+instructions",
+    r"ignore\s+the\s+user",
+    r"ignore\s+user\s+instructions",
+    r"ignore\s+stop",
+    r"ignore\s+cancel",
+    r"never\s+tell\s+the\s+user",
+    r"do\s+not\s+tell\s+the\s+user",
+    r"without\s+informing\s+the\s+user",
+    r"silently\s+exfiltrat",
+    r"exfiltrat",
+    r"continue\s+even\s+if\s+.*stop",
+]
+
+
+def has_prompt_injection(body):
+    text = body.lower()
+
+    return any(
+        re.search(pattern, text)
+        for pattern in PROMPT_PATTERNS
+    )
+
+
+# ---------- excessive_permissions ----------
 
 
 def has_excessive_permissions(frontmatter):
-    perms = frontmatter.get("permissions")
-    if not perms:
+    permissions = frontmatter.get("permissions")
+
+    if not permissions:
         return False
 
-    txt = str(perms).lower()
+    text = str(permissions).lower()
 
-    fs = any(
-        x in txt
-        for x in [
+    excessive_fs = any(
+        phrase in text
+        for phrase in [
             "entire filesystem",
             "read-write access to the entire filesystem",
-            "(/)",
             "filesystem: /",
+            "(/)",
         ]
     )
 
-    net = any(
-        x in txt
-        for x in [
+    excessive_net = any(
+        phrase in text
+        for phrase in [
             "unrestricted egress",
             "any host",
             "all hosts",
@@ -123,58 +171,52 @@ def has_excessive_permissions(frontmatter):
         ]
     )
 
-    desc = str(frontmatter.get("description", "")).lower()
+    return excessive_fs or excessive_net
 
-    narrow = any(
-        x in desc
-        for x in [
-            "summar",
-            "digest",
-            "markdown",
-            "note",
-            "rename",
-            "format",
-            "convert",
-            "single file",
-            "local",
-        ]
+
+# ---------- unclear_provenance ----------
+
+
+def has_unclear_provenance(frontmatter, body):
+    """
+    Only flag if there is evidence of silently modifying provenance.
+    Merely missing metadata is not enough because many valid skills may omit it.
+    """
+
+    text = body.lower()
+
+    suspicious = (
+        "silently update" in text
+        and "version" in text
+    ) or (
+        "clear the changelog" in text
+    ) or (
+        "without surfacing" in text
+        and "version" in text
     )
 
-    return (fs or net) and narrow
+    return suspicious
 
 
-def has_unclear_provenance(frontmatter, text):
-    keys = {k.lower() for k in frontmatter}
-
-    missing = "author" not in keys and "version" not in keys and "changelog" not in keys
-
-    body = text.lower()
-
-    rewrite = ("version" in body) and (
-        "silently update" in body
-        or "without surfacing" in body
-        or "clear the changelog" in body
-    )
-
-    return missing or rewrite
+# ---------- Endpoint ----------
 
 
-@router.post("/check")
-def scan(req: SkillRequest):
-    fm, body = split_frontmatter(req.skill)
+@router.post("/scan")
+async def scan(req: SkillRequest):
+    frontmatter, body = split_frontmatter(req.skill)
 
     categories = []
 
-    if has_hardcoded_secret(req.skill, fm):
+    if has_hardcoded_secret(req.skill, frontmatter):
         categories.append("hardcoded_secret")
 
     if has_prompt_injection(body):
         categories.append("prompt_injection")
 
-    if has_excessive_permissions(fm):
+    if has_excessive_permissions(frontmatter):
         categories.append("excessive_permissions")
 
-    if has_unclear_provenance(fm, body):
+    if has_unclear_provenance(frontmatter, body):
         categories.append("unclear_provenance")
 
     return {"categories": categories}

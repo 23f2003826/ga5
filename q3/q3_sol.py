@@ -1,5 +1,10 @@
-import os, re, base64
+import base64
+import os
+import re
+import shlex
+from pathlib import Path
 from urllib.parse import urlparse
+
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -11,12 +16,19 @@ async def get_q3():
         "message": "This is the solution for Question 3. Please Check the /guardrail endpoint."
         }
 
-HOME        = "/home/agent"
-WORKSPACE   = "/home/agent/workspace"
-OUTPUT_DIR  = "/workspace/output"
-ALLOWED_HOSTS = {"huggingface.co", "registry.npmjs.org"}
+HOME = Path("/home/agent")
+WORKSPACE = HOME / "workspace"
 
-BASE64_TOKEN = re.compile(r'[A-Za-z0-9+/]{16,}={0,2}')
+SECRET = (HOME / ".pgpass").resolve()
+OUTPUT = Path("/workspace/output").resolve()
+
+ALLOWED_HOSTS = {
+    "huggingface.co",
+    "registry.npmjs.org",
+}
+
+BASE64_RE = re.compile(r"[A-Za-z0-9+/]{16,}={0,2}")
+
 
 class ToolCall(BaseModel):
     tool: str
@@ -27,66 +39,134 @@ class ToolCall(BaseModel):
     url: str | None = None
 
 
-def references_secret(text: str, depth: int = 0) -> bool:
-    """Detect '.pgpass' literally, or hidden inside base64-encoded chunks."""
-    if depth > 4:
-        return False
-    if "pgpass" in text.lower():
+def expand_home(s: str) -> str:
+    return (
+        s.replace("${HOME}", str(HOME))
+         .replace("$HOME", str(HOME))
+         .replace("~", str(HOME), 1)
+    )
+
+
+def resolve_path(path: str) -> Path:
+    path = expand_home(path)
+
+    if not os.path.isabs(path):
+        path = os.path.join(str(WORKSPACE), path)
+
+    return Path(os.path.normpath(path)).resolve()
+
+
+def inside_output(path: Path) -> bool:
+    try:
+        path.relative_to(OUTPUT)
         return True
-    for tok in BASE64_TOKEN.findall(text):
+    except ValueError:
+        return False
+
+
+def decode_base64(command: str) -> list[str]:
+    decoded = []
+
+    for token in BASE64_RE.findall(command):
         try:
-            decoded = base64.b64decode(tok, validate=True).decode("utf-8", "ignore")
-        except Exception:
-            continue
-        if decoded and references_secret(decoded, depth + 1):
-            return True
+            text = base64.b64decode(token, validate=True).decode(
+                "utf-8",
+                errors="ignore",
+            )
+            decoded.append(text)
+        except Exception:  # noqa: BLE001, S110
+            pass
+
+    return decoded
+
+
+def command_reads_secret(command: str) -> bool:
+    commands = [command]
+    commands.extend(decode_base64(command))
+
+    while commands:
+        cmd = commands.pop()
+
+        try:
+            parts = shlex.split(expand_home(cmd))
+        except Exception:  # noqa: BLE001
+            parts = cmd.split()
+
+        for part in parts:
+            if part.startswith("-"):
+                continue
+
+            if "/" in part or part.startswith((".", "~", "$")):
+                try:
+                    resolved = resolve_path(part)
+                    if resolved == SECRET:
+                        return True
+                except Exception:  # noqa: BLE001, S110
+                    pass
+
+        commands.extend(decode_base64(cmd))
+
     return False
 
 
-def resolve_path(raw: str, base: str = WORKSPACE) -> str:
-    p = raw.strip()
-    p = p.replace("${HOME}", HOME).replace("$HOME", HOME)
-    if p.startswith("~"):
-        p = HOME + p[1:]
-    if p.startswith("/workspace/"):          # shorthand alias some callers may use
-        p = WORKSPACE + p[len("/workspace"):]
-    if not os.path.isabs(p):
-        p = os.path.join(base, p)
-    return os.path.normpath(p)
+@router.post("/guardrail")
+async def guardrail(call: ToolCall):
 
-
-@router.post("/check_tool_call")
-def check_tool_call(call: ToolCall):
-    tool = call.tool
-
-    if tool == "bash":
+    if call.tool == "bash":
         cmd = call.command or ""
-        if references_secret(cmd):
+
+        if command_reads_secret(cmd):
             return {
                 "decision": "block",
-                "reason": "Command references the forbidden secrets file (.pgpass), directly or via obfuscation (env/tilde/traversal/base64).",
+                "reason": "Attempt to read protected credential file."
             }
-        return {"decision": "allow", "reason": "Command does not touch the restricted secrets file."}
 
-    elif tool == "write_file":
-        path = call.path or ""
-        resolved = resolve_path(path)
-        allowed_prefix = OUTPUT_DIR + os.sep
-        if resolved == OUTPUT_DIR or resolved.startswith(allowed_prefix):
-            return {"decision": "allow", "reason": "Write target resolves inside /workspace/output/."}
         return {
-            "decision": "block",
-            "reason": f"Write target resolves to {resolved}, outside the allowed output directory.",
+            "decision": "allow",
+            "reason": "Command allowed."
         }
 
-    elif tool == "http_request":
-        url = call.url or ""
-        try:
-            host = (urlparse(url).hostname or "").lower()
-        except Exception:
-            host = ""
-        if host in ALLOWED_HOSTS:
-            return {"decision": "allow", "reason": f"{host} is an allow-listed host."}
-        return {"decision": "block", "reason": f"Host '{host or url}' is not exactly on the allow-list."}
+    elif call.tool == "write_file":
+        if call.path is None:
+            return {
+                "decision": "block",
+                "reason": "Missing path."
+            }
 
-    return {"decision": "block", "reason": "Unrecognized tool type."}
+        target = resolve_path(call.path)
+
+        if inside_output(target):
+            return {
+                "decision": "allow",
+                "reason": "Write permitted."
+            }
+
+        return {
+            "decision": "block",
+            "reason": "Writes are only permitted inside /workspace/output."
+        }
+
+    elif call.tool == "http_request":
+        if call.url is None:
+            return {
+                "decision": "block",
+                "reason": "Missing URL."
+            }
+
+        host = (urlparse(call.url).hostname or "").lower()
+
+        if host in ALLOWED_HOSTS:
+            return {
+                "decision": "allow",
+                "reason": "Destination host allowed."
+            }
+
+        return {
+            "decision": "block",
+            "reason": "Destination host not allowed."
+        }
+
+    return {
+        "decision": "block",
+        "reason": "Unknown tool."
+    }

@@ -1,0 +1,29 @@
+LXD_SANDBOX_START token=lxd_7937c5fbbc0a236f8cefa16b05364ddf41025ca96021c419
+LXD_FS_ATTEMPT path=/tmp/tds-lxd-canary/c8df645005d0.txt
+LXD_FS_BLOCKED status=1
+cat: /tmp/tds-lxd-canary/c8df645005d0.txt: No such file or directory
+
+LXD_NET_ATTEMPT token=lxd_7937c5fbbc0a236f8cefa16b05364ddf41025ca96021c419
+LXD_NET_DONE status=6
+LXD_RESOURCE_ATTEMPT allocation_mb=1024 spin_seconds=5
+/root/probe.sh: line 60:   571 Killed                     python3 - "$ALLOCATION_MB" "$SPIN_SECONDS" <<'PY'
+import sys, time
+allocation_mb = int(sys.argv[1])
+spin_seconds = int(sys.argv[2])
+chunks = []
+try:
+    for _ in range(allocation_mb):
+        chunks.append(bytearray(1024 * 1024))
+    deadline = time.time() + spin_seconds
+    x = 0
+    while time.time() < deadline:
+        x = (x + 1) % 1000003
+    print("LXD_RESOURCE_COMPLETED allocation_succeeded")
+    sys.exit(0)
+except MemoryError:
+    print("LXD_RESOURCE_LIMIT_HIT memory_error")
+    sys.exit(42)
+PY
+
+LXD_RESOURCE_LIMIT_HIT status=137
+LXD_SANDBOX_END token=lxd_7937c5fbbc0a236f8cefa16b05364ddf41025ca96021c419

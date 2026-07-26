@@ -1,5 +1,5 @@
 import calendar
-from fastapi import Request, APIRouter
+from fastapi import Request, APIRouter, HTTPException
 
 router = APIRouter()
 
@@ -12,9 +12,11 @@ async def get_q2():
 @router.post("/prorate")
 async def prorate(req: Request):
     b = await req.json()
-    old_price, new_price = b["old_price"], b["new_price"]          # match the real field names
-    days_remaining = b["days_remaining"]                                  # match the real field name
-    days_in_actual_month = b["days_in_actual_month"]                          # match the real field name
+
+    old_price = b["old_price"]
+    new_price = b["new_price"]          
+    days_remaining = b["days_remaining"]                                
+    days_in_actual_month = b["days_in_actual_month"]
     spec = b["spec"]
 
     difference = new_price - old_price
@@ -24,6 +26,6 @@ async def prorate(req: Request):
     elif spec == "v2":
         charge = difference * (days_remaining / days_in_actual_month)
     else:
-        return {"error": "Invalid spec"}
+        raise HTTPException(status_code=400, detail="Invalid spec")
 
-    return {"charge": round(charge, 2)}
+    return {"charge": charge}

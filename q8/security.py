@@ -1,5 +1,5 @@
 from pathlib import Path
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse
 import ipaddress
 import socket
 
@@ -11,31 +11,50 @@ ALLOWED_HOSTS = {
 }
 
 
-def validate_path(user_path):
+def validate_path(user_path: str):
+    if not isinstance(user_path, str) or not user_path:
+        return False, "invalid path"
 
-    decoded = unquote(user_path)
-
-    target = (SANDBOX / decoded).resolve()
+    try:
+        target = (SANDBOX / user_path).resolve(strict=False)
+    except Exception:
+        return False, "invalid path"
 
     try:
         target.relative_to(SANDBOX)
     except ValueError:
         return False, "path traversal"
 
+    if not target.exists():
+        return False, "file not found"
+
+    if not target.is_file():
+        return False, "not a file"
+
     return True, target
 
 
-def validate_url(url):
+def validate_url(url: str):
+    if not isinstance(url, str) or not url:
+        return False, "invalid url"
 
-    p = urlparse(url)
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False, "invalid url"
 
-    if p.scheme not in ("http", "https"):
+    if parsed.scheme not in ("http", "https"):
         return False, "invalid scheme"
 
-    if p.username or p.password:
-        return False, "userinfo"
+    if parsed.username or parsed.password:
+        return False, "userinfo not allowed"
 
-    host = p.hostname
+    host = parsed.hostname
+
+    if host is None:
+        return False, "invalid host"
+
+    host = host.lower().rstrip(".")
 
     if host not in ALLOWED_HOSTS:
         return False, "host not allowed"
@@ -44,7 +63,6 @@ def validate_url(url):
         infos = socket.getaddrinfo(host, None)
 
         for info in infos:
-
             ip = ipaddress.ip_address(info[4][0])
 
             if (
@@ -53,10 +71,10 @@ def validate_url(url):
                 or ip.is_link_local
                 or ip.is_multicast
                 or ip.is_reserved
+                or ip.is_unspecified
             ):
-                return False, "private ip"
-
+                return False, "private address"
     except Exception:
-        return False, "dns"
+        return False, "dns failed"
 
-    return True, host
+    return True, url

@@ -1,21 +1,16 @@
 from pathlib import Path
 import requests
 
-SANDBOX = Path("/srv/agent-redteam/sandbox-0de282cacd")
 
-def read_file(path: str):
-
-    resolved = (SANDBOX / path).resolve()
-
-    return resolved.read_text()
+def read_file(path: Path):
+    return path.read_text(encoding="utf-8")
 
 
-def fetch_url(url):
-
-    r = requests.get(
+def fetch_url(url: str):
+    response = requests.get(
         url,
         timeout=5,
         allow_redirects=False,
     )
 
-    return r.text
+    return response.text

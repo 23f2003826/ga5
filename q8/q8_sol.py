@@ -1,20 +1,24 @@
-from fastapi import APIRouter 
+from typing import Any, Dict
+
+from fastapi import APIRouter
 from pydantic import BaseModel
 
 from .security import validate_path, validate_url
-from .tools import read_file, fetch_url
+from .tools import fetch_url, read_file
 
 router = APIRouter()
+
 
 @router.get("/q8")
 async def get_q8():
     return {
-        "message": "Question 8 endpoint is /q8Sol is running."
+        "message": "Question 8 endpoint is running."
     }
+
 
 class Request(BaseModel):
     tool: str
-    arguments: dict
+    arguments: Dict[str, Any]
 
 
 @router.post("/q8Sol")
@@ -22,37 +26,75 @@ def endpoint(req: Request):
 
     if req.tool == "read_file":
 
-        ok, result = validate_path(req.arguments["path"])
+        path = req.arguments.get("path")
+
+        if path is None:
+            return {
+                "action": "block",
+                "reason": "missing path",
+                "result": None,
+            }
+
+        ok, value = validate_path(path)
 
         if not ok:
             return {
                 "action": "block",
-                "reason": result,
+                "reason": value,
                 "result": None,
             }
 
-        return {
-            "action": "allow",
-            "reason": "inside sandbox",
-            "result": read_file(req.arguments["path"]),
-        }
+        try:
+            content = read_file(value)
 
-    if req.tool == "fetch_url":
+            return {
+                "action": "allow",
+                "reason": "inside sandbox",
+                "result": content,
+            }
 
-        ok, reason = validate_url(req.arguments["url"])
+        except Exception:
+            return {
+                "action": "block",
+                "reason": "unable to read file",
+                "result": None,
+            }
+
+    elif req.tool == "fetch_url":
+
+        url = req.arguments.get("url")
+
+        if url is None:
+            return {
+                "action": "block",
+                "reason": "missing url",
+                "result": None,
+            }
+
+        ok, value = validate_url(url)
 
         if not ok:
             return {
                 "action": "block",
-                "reason": reason,
+                "reason": value,
                 "result": None,
             }
 
-        return {
-            "action": "allow",
-            "reason": "allowed host",
-            "result": fetch_url(req.arguments["url"]),
-        }
+        try:
+            body = fetch_url(value)
+
+            return {
+                "action": "allow",
+                "reason": "allowed host",
+                "result": body,
+            }
+
+        except Exception:
+            return {
+                "action": "block",
+                "reason": "fetch failed",
+                "result": None,
+            }
 
     return {
         "action": "block",

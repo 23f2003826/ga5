@@ -1,11 +1,10 @@
 import re
 
 import yaml
-from fastapi import FastAPI
+from fastapi import APIRouter
 from pydantic import BaseModel
 
-app = FastAPI()
-
+router = APIRouter()
 
 class SkillRequest(BaseModel):
     skill: str
@@ -160,7 +159,7 @@ def has_unclear_provenance(frontmatter, text):
     return missing or rewrite
 
 
-@app.post("/check")
+@router.post("/check")
 def scan(req: SkillRequest):
     fm, body = split_frontmatter(req.skill)
 

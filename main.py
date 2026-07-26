@@ -7,7 +7,7 @@ from q5.q5_sol import router as q5_router
 
 from q6.q6_sol import (router as q6_router, mcp_app)
 
-app = FastAPI()
+app = FastAPI(lifespan=mcp_app.lifespan)
 
 app.include_router(q2_router)
 app.include_router(q3_router)

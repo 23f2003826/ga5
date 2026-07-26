@@ -16,7 +16,7 @@ app.include_router(q5_router)
 app.include_router(q6_router)
 
 # Mount MCP server at /mcp endpoint
-app.mount("/mcp", mcp_app)
+app.mount("/", mcp_app)
 
 @app.get("/")
 async def root():

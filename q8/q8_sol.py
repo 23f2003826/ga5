@@ -2,6 +2,7 @@ from typing import Any, Dict
 
 from fastapi import APIRouter
 from pydantic import BaseModel
+from pathlib import Path
 
 from .security import validate_path, validate_url
 from .tools import fetch_url, read_file
@@ -15,6 +16,16 @@ async def get_q8():
         "message": "Question 8 endpoint is running."
     }
 
+@router.get("/q8debug")
+def q8debug():
+    base = Path("/srv/agent-redteam/sandbox-0de282cacd")
+
+    return {
+        "exists": base.exists(),
+        "report": (base / "notes/report.txt").exists(),
+        "weird": (base / "notes/looks-like-..-but-safe.txt").exists(),
+        "encoded": (base / "encoded/%2e%2e-literal.txt").exists(),
+    }
 
 class Request(BaseModel):
     tool: str

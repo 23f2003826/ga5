@@ -6,6 +6,9 @@ from pathlib import Path
 
 from .security import validate_path, validate_url
 from .tools import fetch_url, read_file
+from .create_files import create_files
+
+create_files()
 
 router = APIRouter()
 
